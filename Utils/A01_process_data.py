@@ -18,30 +18,34 @@ and information about surrounding vehicles are included.
 
 This function processes all of these files
 
-"""
+TODO: Add Traffic Density, MeanSpeed of surrounding vehicle, Traffic Flow
 
-try:
-    from IPython import get_ipython
-    get_ipython().magic('clear')
-    get_ipython().magic('reset -f')
-except:
-    pass
+"""
 
 #import pickle
 import pandas as pd
 import numpy as np
 #import os
 
-
+minSec =10 # in seconds, we focus on vehicles that stay at least 40s in the data
 
 #prject_path = '~/Documents/Research/highD/'
 prject_path = 'C:/Research/highD/'
 dynamic_col_to_use = [0,6,12,13,14,15,24]
-static_col_to_use = [1,2,6,9,10,11,12,13,14,15]
+static_col_to_use = [1,2,6,9,10,11]
 nearby_index = [2,6]
 
+uniqueID = 0 #give an unique ID to the vehicle being processed
 
 Location = 2  #focus only on the location number 2 in the dataset
+L = 0.424  # length of the location under study (in km)
+NumLane = 2
+
+"""
+STAGE A: First, we process data into a line-by-line dataset of all related information
+"""
+
+print("Stage A")
 Car_following_df = []
 for i in range(1,60):
     print("currently at file: " + str(i))
@@ -55,10 +59,10 @@ for i in range(1,60):
         tracksMeta_name = prject_path + "./data/" + str(i) + "_tracksMeta.csv"
         track_name = prject_path + "./data/" + str(i) + "_tracks.csv"
 
-    #Step 1: Read the Record Metadata
+    #Step A.1: Read the Record Metadata
     recordMeta_df = pd.read_csv(record_name)
-    #only take the data where time is between 6-10AM (morning peak)
-    #if int(recordMeta_df["startTime"][0][1]) <6 or int(recordMeta_df["startTime"][0][1]) >9:
+    #only take the data in the morning (if we take the whole day there will be >1M data lines)
+    #if int(recordMeta_df["startTime"][0][1]) >12:
     #    continue
     timestamp =  pd.to_datetime(recordMeta_df["startTime"][0],format='%H:%M')
     time_hour =np.array(timestamp.hour+timestamp.minute/60)
@@ -67,15 +71,18 @@ for i in range(1,60):
     if recordMeta_df["locationId"][0] != Location:
         continue
     
-    #Step 2: Read the tracksMeta data (summary about each vehicle)
+    #Step A.2: Read the tracksMeta data (summary about each vehicle)
     tracksMeta_df = pd.read_csv(tracksMeta_name)
     #Read the track data (individual vehicle data)
     all_track_df = pd.read_csv(track_name)
     #loop through the tracksMeta line-by-line, each line is a vehicle
     for l in range(0,len(tracksMeta_df.index)):
         trackID = tracksMeta_df["id"][l]
-        drivingDirection = tracksMeta_df["drivingDirection"][l]
+        drivingDirection = tracksMeta_df["drivingDirection"][l]  #1 for upper lanes (drive to the left), and 2 for lower lanes (drive to the right)
         numFrames = tracksMeta_df["numFrames"][l]
+        
+        if numFrames < recordMeta_df["frameRate"][0]*minSec:  #only focus to vehicles that we can observed for more than minSec seconds
+            continue
         #sanity check
         if trackID != tracksMeta_df.iloc[l,0]:
             print("The trackID is not the same at line: " + str(l))
@@ -90,10 +97,9 @@ for i in range(1,60):
         #convert to float for speed
         static_df_track=static_df_track.astype(float)
         #META DATA OF static_df_float: width, height, class, minXSpeed,
-        #maxXSpeed,meanXSpeed,min Distance Headway (DHW), min Time Headway (THW)
-        #, min Time to Collision (TTC), number of lane changes         
+        #maxXSpeed,meanXSpeed
         
-        #Step 3: Find the dynamic features of each vehicle
+        #Step A.3: Find the dynamic features of each vehicle
         track_df = all_track_df[all_track_df["id"]==trackID].reset_index(drop=True)
         # on the upper half of the video, the speed and acceleration is negative 
         # because it uses universal positioning
@@ -104,16 +110,28 @@ for i in range(1,60):
             track_df["precedingXVelocity"]=-track_df["precedingXVelocity"]
         
         # loop through each line in the track data
-        for t in range(0,len(track_df.index)-1):
+        for t in range(0,len(track_df.index)-1,recordMeta_df["frameRate"][0]):  #loop by each second
             #print('currently looking at line:' + str(t))
 
             #################################################################            
             # collect all the dynamic vehicle data (e.g. position, speed, etc)
             dynamic_df_track = np.array(track_df.iloc[t,dynamic_col_to_use])
             # META DATA OF dynamic_df_track: frame,XSpeed, Distance Headway, 
-            #Time Headway, Time to Collision, Preceeding XSpeed,LaneID           
+            #Time Headway, Time to Collision, Preceeding XSpeed,LaneID
+            frameID = dynamic_df_track[0]
+            laneID = dynamic_df_track[-1]
             
-            #Step 4: Now look at the all_track_df data to find the location 
+            #Step A.4: Find traffic-related variables: Density and traffic mean speed
+            if drivingDirection==1:
+                traffic_density = len(all_track_df[(all_track_df["frame"]==frameID) & (all_track_df["laneId"] < NumLane+2)]) / (L*NumLane)
+            else: traffic_density = len(all_track_df[(all_track_df["frame"]==frameID) & (all_track_df["laneId"] > NumLane+1)]) / (L*NumLane)
+            
+            if drivingDirection==1:
+                traffic_speed = -np.mean(all_track_df.loc[(all_track_df["frame"]==frameID) & (all_track_df["laneId"] < NumLane+2),"xVelocity"])
+            else: traffic_speed = np.mean(all_track_df.loc[(all_track_df["frame"]==frameID) & (all_track_df["laneId"] > NumLane+1),"xVelocity"])
+            
+            
+            #Step A.5: Now look at the all_track_df data to find the location 
             #and speed of surrounding vehicles
             #for each vehicle we keep [x_location,speed]
             
@@ -154,28 +172,69 @@ for i in range(1,60):
                 rightFollowing_df[1] = np.abs(rightFollowing_df[1])
             else: rightFollowing_df = np.array([0,0])
 
-            #Step 5: Now combine all the data together
+            #Step A.6: Now combine all the data together
         
             #The output of the car-following model is the acceleration
-            Output = np.array(track_df.loc[t+1,"xAcceleration"])
+            Acceleration = np.array(track_df.loc[t+1,"xAcceleration"])
             # Combine the whole line of data
-            line_df = np.hstack([i,trackID,numFrames,drivingDirection,time_hour,dynamic_df_track,leftPreceding_df,leftAlongside_df,leftFollowing_df,rightPreceding_df,rightAlongside_df,rightFollowing_df,static_df_track,Output])
+            line_df = np.hstack([uniqueID,frameID,drivingDirection,time_hour,static_df_track,dynamic_df_track[1:-1],leftPreceding_df,leftAlongside_df,leftFollowing_df,rightPreceding_df,rightAlongside_df,rightFollowing_df,traffic_density,traffic_speed,laneID,Acceleration])
             # METADATA OF THE WHOLE DATAFRAME:
-            # fileid,trackID,numFrames,drivingDirection,time_hour,frame,XSpeed, 
-            #Distance Headway, Time Headway, Time to Collision, Preceeding XSpeed,
-            #LaneID,maxXSpeed,meanXSpeed,min Distance Headway (DHW), 
-            #min Time Headway (THW), min Time to Collision (TTC), 
-            #number of lane changes,leftPreceding_df,leftAlongside_df,leftFollowing_df,
+            # uniqueID,frameID,drivingDirection,time_hour,width, height, class, minXSpeed,
+            #maxXSpeed,meanXSpeed,XSpeed,Distance Headway, Time Headway, Time to Collision, Preceeding XSpeed,
+            #LaneID,leftPreceding_df,leftAlongside_df,leftFollowing_df,
             #rightPreceding_df,rightAlongside_df (each as Xpos and Xspeed), Output (Acceleration)
             
             
             Car_following_df.append(line_df)
-            
+        
+        uniqueID += 1
         print(len(Car_following_df))
+        
     
-#save pickle file
+#import pickle
 #with open('Car_following_df.pickle', 'wb') as f:
-#    pickle.dump(Car_following_df, f)
+#    pickle.dump(Car_following_df_2d, f)
 #save csv file as well
 Car_following_df_2d = np.vstack(Car_following_df)        
-np.savetxt("Car_following_df_2d.csv", Car_following_df_2d,fmt='%10.3f', delimiter=",")    
+#np.savetxt("Car_following_df_AM.csv", Car_following_df_2d,fmt='%6.2f', delimiter=",")    
+
+np.savetxt("Car_following_df_raw.csv", Car_following_df_2d,fmt='%5.2f', delimiter=",")   
+
+"""
+STAGE B: next, we process the data such that data from previous time steps are also included in the features
+"""
+print("Stage B")
+
+static_index = [2,3,4,5,6,7,8,9]
+
+list_veh = np.unique(Car_following_df_2d[:,0])
+DL_df = []
+#loop through each vehicle in the processed data
+for v in list_veh:
+    Veh_df = Car_following_df_2d[Car_following_df_2d[:,0]==v,:]  #take out the vehicle data to analyse
+    
+   
+    for l in range(0,len(Veh_df)-3):
+        #take static data only
+        static_df = Veh_df[l,static_index]
+        #now look at 03 time steps ahead and take all the dynamic information
+        dynamic1 = Veh_df[l,static_index[-1]+1:-2]
+        dynamic2 = Veh_df[l+1,static_index[-1]+1:-2]
+        dynamic3 = Veh_df[l+2,static_index[-1]+1:-2]
+        #combine all the static and dynamic data
+        line_df = np.hstack([static_df,dynamic1,dynamic2,dynamic3,np.abs(Veh_df[l+3,-2]-Veh_df[l,-2]),Veh_df[l+3,-1]])
+        #write to a large list
+        DL_df.append(line_df)
+        
+    print(v)
+#convert the list into a 2D dataframe
+DL_df_2D = np.vstack(DL_df)
+#write to data file
+np.savetxt("Car_following_df.csv", DL_df_2D,fmt='%5.2f', delimiter=",")   
+                     
+                     
+                
+        
+
+
+
