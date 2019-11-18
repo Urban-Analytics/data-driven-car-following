@@ -18,7 +18,21 @@ and information about surrounding vehicles are included.
 
 This function processes all of these files
 
-TODO: Add Traffic Density, MeanSpeed of surrounding vehicle, Traffic Flow
+TODO:
+1. Empirical analysis: Identify cases/situations in the data
+2. Throw the data to a DL
+3. Simulate and see if it's reproduce the data
+4. If not, then we separate the cases to each model
+5. 
+
+
+1. Distance to the leading vehicle
+2. Driver heterogeneity : different models for each class of drivers
+3. Cooperative & uncooperative behaviours
+4. Find out whether a car nearby is changing their lanes
+5. Rare situations: in the data or not in the data but the model needs to
+give estimates
+
 
 """
 
@@ -116,8 +130,8 @@ for i in range(1,60):
             #################################################################            
             # collect all the dynamic vehicle data (e.g. position, speed, etc)
             dynamic_df_track = np.array(track_df.iloc[t,dynamic_col_to_use])
-            # META DATA OF dynamic_df_track: frame,XSpeed, Distance Headway, 
-            #Time Headway, Time to Collision, Preceeding XSpeed,LaneID
+            # META DATA OF dynamic_df_track: XSpeed, Distance Headway,
+            #Time Headway, Time to Collision, Preceeding XSpeed
             frameID = dynamic_df_track[0]
             laneID = dynamic_df_track[-1]
             

@@ -3,7 +3,10 @@
 @author: Minh Kieu, University of Leeds
 
 This function reads the processed Car_following_df_2d.csv file and try to propose a 
-deep car following model to predicts the acceleration rate at the next frame (1/25s)
+deep car following model to predicts the acceleration rate at the next time interval (1s)
+
+Note that this model try to predict the acceleration only, so it's a separated
+car-following model (no lane changing)
 
 The lower the loss, the better a model (unless the model has over-fitted to the training data). 
 The loss is calculated on training and validation and its interperation is how well the model 
@@ -40,28 +43,39 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 #from pandas import read_csv
-import keras
-from keras.models import Sequential
-from keras.layers import Dense, Dropout
+import tensorflow.keras
+#from tensorflow.keras import backend
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout
 
 from sklearn.preprocessing import MinMaxScaler
 #from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import train_test_split
 
 #Step 1: load data abd process the data for modelling
-prject_path = '/Users/MinhKieu/Documents/Research/highD/'
+prject_path = '/Users/MinhKieu/Documents/Github/data-driven-car-following/'
 filename = prject_path + "data/Car_following_df.csv"
 dataset = np.genfromtxt(filename, delimiter=',',dtype=None)
 
-#names=('UniqueID','Direction', 'Time_hour', 'Frame' ,'Speed', 'Distance_Headway', 
-#'Time_Headway' ,'Time_to_Collision','Preceeding_Speed', 'LaneID','Left_Pre_X',
-#'Left_Pre_Speed','Left_Al_X','Left_Al_Speed','Left_Fol_X','Left_Fol_Speed',
-#'Right_Pre_X','Right_Pre_Speed','Right_Al_X','Right_Al_Speed','Right_Fol_X',
-#'Right_Fol_Speed','Length','Width','Class','MinSpeed','MaxSpeed','MeanSpeed',
-#'LaneChange','Acceleration'))
+names=('drivingDirection','time_hour','width','height', 'class', 'minXSpeed',
+        'maxXSpeed','meanXSpeed',
+        'Speed3', 'Distance_Headway3',
+        'Time_Headway3' ,'Time_to_Collision3','Preceeding_Speed3','Left_Pre_X3',
+        'Left_Pre_Speed3','Left_Al_X3','Left_Al_Speed3','Left_Fol_X3','Left_Fol_Speed3',
+        'Right_Pre_X3','Right_Pre_Speed3','Right_Al_X3','Right_Al_Speed3','Right_Fol_X3',
+        'Right_Fol_Speed3','traffic_density3','traffic_speed3',
+        'Speed2', 'Distance_Headway2',
+        'Time_Headway2', 'Time_to_Collision2', 'Preceeding_Speed2', 'Left_Pre_X2',
+        'Left_Pre_Speed2', 'Left_Al_X2', 'Left_Al_Speed2', 'Left_Fol_X2', 'Left_Fol_Speed2',
+        'Right_Pre_X2', 'Right_Pre_Speed2', 'Right_Al_X2', 'Right_Al_Speed2', 'Right_Fol_X2',
+        'Right_Fol_Speed2', 'traffic_density2', 'traffic_speed2',
+        'Speed1', 'Distance_Headway1',
+        'Time_Headway1', 'Time_to_Collision1', 'Preceeding_Speed1', 'Left_Pre_X1',
+        'Left_Pre_Speed1', 'Left_Al_X1', 'Left_Al_Speed1', 'Left_Fol_X1', 'Left_Fol_Speed1',
+        'Right_Pre_X1', 'Right_Pre_Speed1', 'Right_Al_X1', 'Right_Al_Speed1', 'Right_Fol_X1',
+        'Right_Fol_Speed1', 'traffic_density1', 'traffic_speed1')
 
 ## process the data to consider static vs dynamic variables, and also consider several time steps
-
 
 # normalize the dataset
 scaler = MinMaxScaler(feature_range=(0, 1))
@@ -69,12 +83,12 @@ dataset = scaler.fit_transform(dataset)
 
 # Labels are the values we want to predict
 acceleration = np.array(dataset[:,dataset.shape[1]-1])  #last column: acceleration
-lanechange = np.array(dataset[:,dataset.shape[1]-2]) 
+lanechange = np.array(dataset[:,dataset.shape[1]-2])   #second last column: lane change (binary)
 
-target = np.array(dataset[:,dataset.shape[1]-2:]) 
+target = acceleration
 
 # Remove the labels from the features
-dataset= dataset[:,:-2]
+dataset= dataset[:,7:-2]
 # Using Skicit-learn to split data into training and testing sets
 # Split the data into training and testing sets
 train_features, test_features, train_labels, test_labels = train_test_split(dataset, target, test_size = 0.25, random_state = 42)
@@ -92,10 +106,12 @@ def build_model():
     model.add(Dense(64, activation='relu', input_dim=train_features.shape[1]))
     #model.add(Dropout(0.5))
     model.add(Dense(64, activation='relu'))
+    #model.add(Dropout(0.5))
+    model.add(Dense(64, activation='relu'))
     model.add(Dropout(0.5))
     #model.add(Dense(64, activation='relu'))
     #model.add(Dropout(0.5))
-    model.add(Dense(2, activation='relu'))
+    model.add(Dense(1, activation='relu'))
     
     model.compile(loss='mse',
                   optimizer='adam',
@@ -105,10 +121,10 @@ def build_model():
 model = build_model()
 
 # The patience parameter is the amount of epochs to check for improvement
-early_stop = keras.callbacks.EarlyStopping(monitor='val_loss', patience=10)
+early_stop = tensorflow.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10)
 
 # Display training progress by printing a single dot for each completed epoch
-class PrintDot(keras.callbacks.Callback):
+class PrintDot(tensorflow.keras.callbacks.Callback):
   def on_epoch_end(self, epoch, logs):
     if epoch % 100 == 0: print('')
     print('.', end='')
@@ -118,7 +134,7 @@ EPOCHS = 100
 history = model.fit(
   train_features, train_labels,
   epochs=EPOCHS, validation_split = 0.2, verbose=0,
-  callbacks=[PrintDot()])
+  callbacks=[early_stop])
 
 
 ##########
@@ -126,12 +142,12 @@ history = model.fit(
 
 #score: first is the mean squared error, second is the accuracy in percentage
 # for instance accuracy = 0.94 means 94% of accuracy
-score = model.evaluate(test_features, test_labels, batch_size=128)
+#score = model.evaluate(test_features, test_labels, batch_size=128)
 
-hist = pd.DataFrame(history.history)
-hist['epoch'] = history.epoch
+#hist = pd.DataFrame(history.history)
+#hist['epoch'] = history.epoch
 
-model.summary()
+#model.summary()
 
 
 def plot_history(history):
@@ -168,29 +184,29 @@ plot_history(history)
 ##########
 # Step 4: Test the models
 
-loss, mae, mse = model.evaluate(test_features, test_labels, verbose=2)
+#loss, mae, mse = model.evaluate(test_features, test_labels, verbose=2)
 
-print("Testing set Mean Abs Error: {:5.2f}".format(mae))
+#print("Testing set Mean Abs Error: {:5.2f}".format(mae))
 
 test_predictions = model.predict(test_features)
 
-
-plt.scatter(test_labels[:,0], np.round(test_predictions[:,0]))
+plt.figure()
+plt.scatter(test_labels, test_predictions)
 plt.xlabel('True Values')
 plt.ylabel('Predictions')
 plt.axis('equal')
 plt.axis('square')
 plt.xlim([0,plt.xlim()[1]])
 plt.ylim([0,plt.ylim()[1]])
+plt.savefig(prject_path + "figures/scatter_pred.pdf", bbox_inches='tight')
+plt.show()
 #_ = plt.plot([-100, 100], [-100, 100])
 
-error = test_predictions[:,0] - test_labels[:,0]
-plt.hist(error, bins = 25)
-plt.xlabel("Prediction Error")
-_ = plt.ylabel("Count")
-
-
-plt.hist(train_labels[:,0], bins = 25)
+#plt.figure()
+#error = test_predictions - test_labels
+#plt.hist(error, bins = 25)
 #plt.xlabel("Prediction Error")
-_ = plt.ylabel("Count")
+#_ = plt.ylabel("Count")
+#plt.savefig(prject_path + "figures/error_bins.pdf", bbox_inches='tight')
+#plt.show()
 
